@@ -100,8 +100,32 @@
             backdrop-filter: blur(10px);
             padding: 15px 25px;
             border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 15px rgba(0, 238, 255, 0.1);
             text-align: center;
+            transition: 0.3s;
+        }
+
+        .glass-box:hover {
+            border-color: var(--arcade-blue);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 20px rgba(0, 238, 255, 0.3);
+        }
+
+        #boost-container {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #boost-fill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #00eeff, #ff00ff);
+            box-shadow: 0 0 10px #00eeff;
+            transition: width 0.1s;
         }
 
         .label {
@@ -123,17 +147,34 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%) scale(0);
-            font-size: 100px;
+            font-size: 80px;
             color: #fff;
-            text-shadow: 0 0 30px var(--arcade-blue), 0 0 60px var(--arcade-blue);
+            text-shadow: 0 0 20px var(--arcade-blue), 0 0 40px var(--arcade-red), 0 0 60px #fff;
             z-index: 200;
             pointer-events: none;
-            transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transition: transform 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55), opacity 0.5s;
             white-space: nowrap;
+            letter-spacing: 10px;
+            opacity: 0;
+            filter: blur(10px);
         }
 
         #level-splash.active {
-            transform: translate(-50%, -50%) scale(1);
+            transform: translate(-50%, -50%) scale(1.2);
+            opacity: 1;
+            filter: blur(0);
+            animation: level-shine 1.5s infinite alternate;
+        }
+
+        @keyframes level-shine {
+            from {
+                text-shadow: 0 0 20px var(--arcade-blue), 0 0 40px var(--arcade-red);
+            }
+
+            to {
+                text-shadow: 0 0 40px var(--arcade-blue), 0 0 80px var(--arcade-red), 0 0 100px #fff;
+                transform: translate(-50%, -50%) scale(1.3);
+            }
         }
 
         .unit {
@@ -307,6 +348,12 @@
                     <div class="label">Pos</div>
                     <div class="value"><span id="pos-val">1</span><span class="unit">/ 26</span></div>
                 </div>
+                <div class="glass-box" style="min-width: 150px;">
+                    <div class="label">Nitro</div>
+                    <div id="boost-container">
+                        <div id="boost-fill"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="level-splash">LEVEL UP!</div>
@@ -379,6 +426,8 @@
         let audioCtx, engineOsc;
         let currentLevel = 1;
         let isLevelingUp = false;
+        let boostAmount = 100;
+        let isBoosting = false;
 
         // --- ASSETS (PROCEDURAL) ---
         const COLORS = {
@@ -546,9 +595,18 @@
 
             if (gameState === STATE_RACING) {
                 // Input
-                if (keys['ArrowUp']) speed += ACCEL * dt;
-                else if (keys['ArrowDown']) speed += BREAKING * dt;
-                else speed += DEACCEL * dt;
+                const isSpace = keys[' '] || keys['Spacebar'];
+                isBoosting = isSpace && boostAmount > 0 && speed > 10;
+
+                if (isBoosting) {
+                    speed += (ACCEL * 2.5) * dt;
+                    boostAmount -= 40 * dt;
+                } else {
+                    if (keys['ArrowUp']) speed += ACCEL * dt;
+                    else if (keys['ArrowDown']) speed += BREAKING * dt;
+                    else speed += DEACCEL * dt;
+                    boostAmount = Math.min(100, boostAmount + 10 * dt);
+                }
 
                 // Steering
                 const dx = dt * 2.5 * (speed / MAX_SPEED);
@@ -561,7 +619,9 @@
 
                 // Bounds
                 if ((playerX < -1.1 || playerX > 1.1) && speed > OFF_ROAD_LIMIT) speed += OFF_ROAD_DECEL * dt;
-                speed = Math.max(0, Math.min(speed, MAX_SPEED));
+
+                const currentMax = isBoosting ? MAX_SPEED * 1.5 : MAX_SPEED;
+                speed = Math.max(0, Math.min(speed, currentMax));
                 trackPosition += speed * dt;
 
                 // AI Cars
@@ -573,7 +633,7 @@
                 // Collision
                 if (gameState === STATE_RACING) {
                     for (let car of cars) {
-                        if (Math.abs(trackPosition - car.z) < 400 && Math.abs(playerX - car.offset) < 0.4) {
+                        if (Math.abs(trackPosition - car.z) < 400 && Math.abs(playerX - car.offset) < 0.3) {
                             speed = car.speed * 0.7;
                             playerX += (playerX > car.offset ? 0.2 : -0.2);
                             playTone(100, 0.2);
@@ -609,6 +669,7 @@
                     document.getElementById('speed-val').innerText = Math.round(speed / 100);
                     document.getElementById('pos-val').innerText = rank;
                     document.getElementById('level-val').innerText = currentLevel;
+                    document.getElementById('boost-fill').style.width = boostAmount + "%";
                     document.getElementById('player-dot').style.bottom = (trackPosition / trackLength * 100) + "%";
                 }
 
@@ -843,6 +904,17 @@
             ctx.fillStyle = "rgba(255, 0, 0, " + lightAlpha + ")";
             ctx.fillRect(-w / 2.5, -h / 2.2, w / 4, 3 * s);
             ctx.fillRect(w / 2.5 - w / 4, -h / 2.2, w / 4, 3 * s);
+
+            // 5b. Boost Flames
+            if (isPlayer && isBoosting) {
+                ctx.fillStyle = "rgba(0, 238, 255, " + (0.5 + Math.random() * 0.5) + ")";
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    ctx.arc(-w / 3 + (Math.random() * 5), h / 4 + (Math.random() * 10), Math.random() * 10 * s, 0, Math.PI * 2);
+                    ctx.arc(w / 3 + (Math.random() * 5), h / 4 + (Math.random() * 10), Math.random() * 10 * s, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
 
             // 6. Identification
             ctx.fillStyle = "#fff";
