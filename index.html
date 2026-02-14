@@ -90,15 +90,18 @@
 
         .hud-panel {
             display: flex;
-            justify-content: space-between;
-            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
         }
 
         .glass-box {
             background: var(--glass-bg);
             border: 1px solid var(--glass-border);
             backdrop-filter: blur(10px);
-            padding: 15px 25px;
+            padding: 10px 15px;
+            min-width: 100px;
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 15px rgba(0, 238, 255, 0.1);
             text-align: center;
@@ -137,7 +140,7 @@
         }
 
         .value {
-            font-size: 32px;
+            font-size: 24px;
             color: var(--arcade-yellow);
             text-shadow: 0 0 10px rgba(255, 242, 0, 0.5);
         }
@@ -314,9 +317,82 @@
             }
 
             .hud-panel {
-                scale: 0.6;
-                transform-origin: top left;
+                scale: 1;
+                gap: 5px;
             }
+
+            .glass-box {
+                padding: 5px 8px;
+                min-width: 70px;
+            }
+
+            .value {
+                font-size: 18px;
+            }
+
+            .label {
+                font-size: 10px;
+            }
+        }
+
+        #screen-shake {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        @keyframes shake {
+            0% {
+                transform: translate(1px, 1px) rotate(0deg);
+            }
+
+            10% {
+                transform: translate(-1px, -2px) rotate(-1deg);
+            }
+
+            20% {
+                transform: translate(-3px, 0px) rotate(1deg);
+            }
+
+            30% {
+                transform: translate(3px, 2px) rotate(0deg);
+            }
+
+            40% {
+                transform: translate(1px, -1px) rotate(1deg);
+            }
+
+            50% {
+                transform: translate(-1px, 2px) rotate(-1deg);
+            }
+
+            60% {
+                transform: translate(-3px, 1px) rotate(0deg);
+            }
+
+            70% {
+                transform: translate(3px, 1px) rotate(-1deg);
+            }
+
+            80% {
+                transform: translate(-1px, -1px) rotate(1deg);
+            }
+
+            90% {
+                transform: translate(1px, 2px) rotate(0deg);
+            }
+
+            100% {
+                transform: translate(1px, -2px) rotate(-1deg);
+            }
+        }
+
+        .shaking {
+            animation: shake 0.5s infinite;
         }
 
         #speed-lines {
@@ -389,6 +465,7 @@
             <div id="level-splash">LEVEL UP!</div>
 
             <div id="speed-lines"></div>
+            <div id="screen-shake"></div>
 
             <div id="minimap-container">
                 <div id="player-dot"></div>
@@ -460,6 +537,8 @@
         let isLevelingUp = false;
         let boostAmount = 100;
         let isBoosting = false;
+        let crashTimer = 0;
+        let playerAngle = 0;
 
         // --- ASSETS (PROCEDURAL) ---
         const COLORS = {
@@ -627,27 +706,38 @@
 
             if (gameState === STATE_RACING) {
                 // Input
-                const isSpace = keys[' '] || keys['Spacebar'];
-                isBoosting = isSpace && boostAmount > 0 && speed > 10;
+                const isSpace = keys[' '] || keys['Spacebar'] || keys['Space'];
+                const wasBoosting = isBoosting;
+                isBoosting = isSpace && boostAmount > 0 && speed > 10 && crashTimer <= 0;
 
                 if (isBoosting) {
-                    speed += (ACCEL * 2.5) * dt;
-                    boostAmount -= 40 * dt;
+                    if (!wasBoosting) speed += 2000; // Activation Kick
+                    speed += (ACCEL * 3) * dt;
+                    boostAmount -= 50 * dt;
                 } else {
-                    if (keys['ArrowUp']) speed += ACCEL * dt;
-                    else if (keys['ArrowDown']) speed += BREAKING * dt;
+                    if (keys['ArrowUp'] && crashTimer <= 0) speed += ACCEL * dt;
+                    else if (keys['ArrowDown'] || (crashTimer > 0)) speed += BREAKING * dt;
                     else speed += DEACCEL * dt;
-                    boostAmount = Math.min(100, boostAmount + 10 * dt);
+                    boostAmount = Math.min(100, boostAmount + 15 * dt);
                 }
 
                 // Steering
-                const dx = dt * 2.5 * (speed / MAX_SPEED);
-                if (keys['ArrowLeft']) playerX -= dx;
-                if (keys['ArrowRight']) playerX += dx;
+                if (crashTimer <= 0) {
+                    const dx = dt * 2.5 * (speed / MAX_SPEED);
+                    if (keys['ArrowLeft']) playerX -= dx;
+                    if (keys['ArrowRight']) playerX += dx;
 
-                // Centrifugal
-                const seg = segments[Math.floor(trackPosition / SEGMENT_LENGTH) % segments.length];
-                playerX -= dx * (speed / MAX_SPEED) * (seg.curve || 0) * 0.05;
+                    // Centrifugal
+                    const seg = segments[Math.floor(trackPosition / SEGMENT_LENGTH) % segments.length];
+                    playerX -= dx * (speed / MAX_SPEED) * (seg.curve || 0) * 0.05;
+                } else {
+                    crashTimer -= dt;
+                    playerAngle += dt * 10; // Crash spin
+                    if (crashTimer <= 0) {
+                        playerAngle = 0;
+                        document.getElementById('screen-shake').classList.remove('shaking');
+                    }
+                }
 
                 // Bounds
                 if ((playerX < -1.1 || playerX > 1.1) && speed > OFF_ROAD_LIMIT) speed += OFF_ROAD_DECEL * dt;
@@ -663,12 +753,13 @@
                 }
 
                 // Collision
-                if (gameState === STATE_RACING) {
+                if (gameState === STATE_RACING && crashTimer <= 0) {
                     for (let car of cars) {
                         if (Math.abs(trackPosition - car.z) < 400 && Math.abs(playerX - car.offset) < 0.3) {
-                            speed = car.speed * 0.7;
-                            playerX += (playerX > car.offset ? 0.2 : -0.2);
-                            playTone(100, 0.2);
+                            speed = car.speed * 0.3;
+                            crashTimer = 1.0;
+                            document.getElementById('screen-shake').classList.add('shaking');
+                            playTone(100, 0.4);
                         }
                     }
 
@@ -890,11 +981,12 @@
 
         function drawCar(x, y, scale, color, isPlayer = false) {
             const w = scale * 120000;
-            const h = w / 2.2; // Sleeker profile
+            const h = w / 2.2;
             const s = w / 52;
 
             ctx.save();
             ctx.translate(x, y);
+            if (isPlayer && crashTimer > 0) ctx.rotate(playerAngle);
 
             // 1. Shadows
             ctx.fillStyle = "rgba(0,0,0,0.5)";
